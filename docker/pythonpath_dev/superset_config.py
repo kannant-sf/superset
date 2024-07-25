@@ -22,9 +22,18 @@
 #
 import logging
 import os
-
+import requests
+import json
 from celery.schedules import crontab
 from flask_caching.backends.filesystemcache import FileSystemCache
+from flask import redirect, g, request, flash
+from werkzeug.security import check_password_hash
+from superset.security.manager import SupersetSecurityManager
+from flask_appbuilder.security.manager import AUTH_REMOTE_USER
+from flask_login import login_user
+from flask_appbuilder.security.views import AuthRemoteUserView
+from flask_appbuilder import expose
+from superset import app, db
 
 logger = logging.getLogger()
 
@@ -91,6 +100,84 @@ class CeleryConfig:
 
 
 CELERY_CONFIG = CeleryConfig
+
+class RemoteUserMiddleware(object):
+        def __init__(self, app):
+            self.app = app
+        def __call__(self, environ, start_response):
+            user = environ.pop('HTTP_USER', None)
+            environ['REMOTE_USER'] = user
+    
+            return self.app(environ, start_response)
+    
+ADDITIONAL_MIDDLEWARE = [RemoteUserMiddleware]
+    
+class CustomRemoteUserView(AuthRemoteUserView):
+    login_template = ""
+    
+    @expose("/login/")
+    def login(self):
+        logger.info("Using custom security manager")
+        username = ""
+        token = request.args.get('token')
+        tenant_identifier = request.args.get('id')
+        tenant_code = request.args.get('code')
+        url = "https://gateway.uat.fortecloud.io/api/v1/profile"
+
+        # if g.user is not None and g.user.is_authenticated:
+        #     return redirect(self.appbuilder.get_url_for_index)
+
+        def get_userName(user_roles):
+            report_admin_present =  any(role.get('roleName') == 'REPORT_ADMIN' for role in user_roles)
+            if report_admin_present:
+                return tenant_code + "_reportadmin"
+            
+            report_view_present = any(role.get('roleName') == 'REPORT_VIEW' for role in user_roles)
+            if report_view_present:
+                return tenant_code + "_reportviewer"
+
+        try:
+            token = "Bearer " + token
+            response = requests.get(url, headers={"Tenant_identifier":tenant_identifier, "Authorization": token})
+
+            if response.status_code == 200:
+                user_data = response.json()
+                user_roles = user_data['data']['userRoles']
+                logger.info("userprofile")
+
+                logger.info(user_roles)
+                security_manager = self.appbuilder.sm
+                username=get_userName(user_roles)
+
+                logger.info(username)
+
+                user_model = security_manager.user_model
+                role_model = security_manager.role_model
+
+                user = db.session.query(user_model).filter_by(username=username).one()
+                admin_role = db.session.query(role_model).filter_by(name='Admin').one()
+
+                logger.info("Records from db")
+                logger.info(admin_role)
+                logger.info("details")
+                if user is not None:
+                    user.roles.append(admin_role)
+                    logger.info(user)
+                    db.session.commit()
+                    login_user(user)
+                    return redirect(self.appbuilder.get_url_for_index)
+            else:
+                print('Error:', response.status_code)
+                logger.warning("User not found")
+                return redirect('/login/')
+        except requests.exceptions.RequestException as e:
+            logger.error('Error:')
+            return redirect('/login/')
+class CustomSecurityManager(SupersetSecurityManager):
+    authremoteuserview = CustomRemoteUserView
+
+CUSTOM_SECURITY_MANAGER = CustomSecurityManager
+AUTH_TYPE = AUTH_REMOTE_USER
 
 FEATURE_FLAGS = {"ALERT_REPORTS": True}
 ALERT_REPORTS_NOTIFICATION_DRY_RUN = True
