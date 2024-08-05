@@ -124,8 +124,8 @@ class CustomRemoteUserView(AuthRemoteUserView):
         tenant_code = request.args.get('code')
         url = "https://gateway.uat.fortecloud.io/api/v1/profile"
 
-        # if g.user is not None and g.user.is_authenticated:
-        #     return redirect(self.appbuilder.get_url_for_index)
+        if g.user is not None and g.user.is_authenticated:
+            return redirect(self.appbuilder.get_url_for_index)
 
         def get_userName(user_roles):
             report_admin_present =  any(role.get('roleName') == 'REPORT_ADMIN' for role in user_roles)
@@ -154,22 +154,29 @@ class CustomRemoteUserView(AuthRemoteUserView):
                 user_model = security_manager.user_model
                 role_model = security_manager.role_model
 
-                user = db.session.query(user_model).filter_by(username=username).one()
-                admin_role = db.session.query(role_model).filter_by(name='Admin').one()
+                # user = db.session.query(user_model).filter_by(username=username).one()
+                user = security_manager.find_user(username=username)
+                admin_role = security_manager.find_role("Admin")
+                # admin_role = db.session.query(role_model).filter_by(name='Admin').one()
 
-                logger.info("Records from db")
-                logger.info(admin_role)
-                logger.info("details")
-                if user is not None:
-                    user.roles.append(admin_role)
-                    logger.info(user)
-                    db.session.commit()
-                    login_user(user)
-                    return redirect(self.appbuilder.get_url_for_index)
-            else:
-                print('Error:', response.status_code)
-                logger.warning("User not found")
-                return redirect('/login/')
+                with app.app_context():
+                    logger.info("Records from db")
+                    logger.info(admin_role)
+                    logger.info("user_security")
+                    # logger.info(user_security)
+                    # logger.info(admin_role_security)
+                    logger.info("details")
+                    if user is not None:
+                        user.roles.append(admin_role)
+                        logger.info(user)
+                        logger.info(user.roles)
+                        db.session.commit()
+                        login_user(user)
+                        return redirect(self.appbuilder.get_url_for_index)
+                    else:
+                        print('Error:', response.status_code)
+                        logger.warning("User not found")
+                        return redirect('/login/')
         except requests.exceptions.RequestException as e:
             logger.error('Error:')
             return redirect('/login/')
