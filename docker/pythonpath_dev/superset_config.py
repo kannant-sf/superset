@@ -151,20 +151,13 @@ class CustomRemoteUserView(AuthRemoteUserView):
 
                 logger.info(username)
 
-                user_model = security_manager.user_model
-                role_model = security_manager.role_model
-
-                # user = db.session.query(user_model).filter_by(username=username).one()
                 user = security_manager.find_user(username=username)
                 admin_role = security_manager.find_role("Admin")
-                # admin_role = db.session.query(role_model).filter_by(name='Admin').one()
 
                 with app.app_context():
                     logger.info("Records from db")
                     logger.info(admin_role)
                     logger.info("user_security")
-                    # logger.info(user_security)
-                    # logger.info(admin_role_security)
                     logger.info("details")
                     if user is not None:
                         user.roles.append(admin_role)
