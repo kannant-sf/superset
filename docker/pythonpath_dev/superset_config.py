@@ -22,18 +22,8 @@
 #
 import logging
 import os
-import requests
-import json
 from celery.schedules import crontab
 from flask_caching.backends.filesystemcache import FileSystemCache
-from flask import redirect, g, request, flash
-from werkzeug.security import check_password_hash
-from superset.security.manager import SupersetSecurityManager
-from flask_appbuilder.security.manager import AUTH_REMOTE_USER, AUTH_DB
-from flask_login import login_user
-from flask_appbuilder.security.views import AuthRemoteUserView, AuthDBView
-from flask_appbuilder import expose
-from superset import app, db
 
 logger = logging.getLogger()
 
@@ -99,120 +89,40 @@ class CeleryConfig:
     }
 
 
-CELERY_CONFIG = CeleryConfig
-
-class RemoteUserMiddleware(object):
-        def __init__(self, app):
-            self.app = app
-        def __call__(self, environ, start_response):
-            user = environ.pop('HTTP_USER', None)
-            environ['REMOTE_USER'] = user
-    
-            return self.app(environ, start_response)
-    
-ADDITIONAL_MIDDLEWARE = [RemoteUserMiddleware]
-SECRET_KEY="CpG6OSmnv4eutuCLTJ3IYXYjq084RiOqCKXQ0BcVEOA="
-SUPERSET_SECRET_KEY="CpG6OSmnv4eutuCLTJ3IYXYjq084RiOqCKXQ0BcVEOA="
-    
-class CustomAuthDBView(AuthDBView):
-    print("In custom AuthDB view")
-    @expose('/login/', methods=['GET', 'POST'])
-    def login(self):
-        logger.info("Using auth db view")
-
-        token = request.args.get('token')
-        tenant_identifier = request.args.get('id')
-        tenant_code = request.args.get('code')
-        url = "https://gateway.uat.fortecloud.io/api/v1/profile"
-
-
-        if token and tenant_code and tenant_identifier:
-            logger.info("check point")
-
-            def get_userName(user_roles):
-                report_admin_present =  any(role.get('roleName') == 'REPORT_ADMIN' for role in user_roles)
-                if report_admin_present:
-                    return tenant_code + "_reportadmin"
-            
-                report_view_present = any(role.get('roleName') == 'REPORT_VIEW' for role in user_roles)
-                if report_view_present:
-                    return tenant_code + "_reportviewer"
-
-            try:
-                token = "Bearer " + token
-                response = requests.get(url, headers={"Tenant_identifier":tenant_identifier, "Authorization": token})
-
-
-                if response.status_code == 200:
-                    user_data = response.json()
-                    user_roles = user_data['data']['userRoles']
-                    logger.info("userprofile")
-
-                    logger.info(user_roles)
-                    security_manager = self.appbuilder.sm
-                    username=get_userName(user_roles)
-
-                    logger.info(username)
-
-                    user = security_manager.find_user(username=username)
-                    admin_role = security_manager.find_role("Admin")
-
-                    with app.app_context():
-                        logger.info("Records from db")
-                        logger.info("user_security")
-                        logger.info("details")
-                        if user is not None:
-                            logger.info(user)
-                            logger.info(user.roles)
-                            db.session.commit()
-                            login_user(user)
-                            # return redirect("http://localhost:8088/superset/dashboard/9/")
-                            return redirect(self.appbuilder.get_url_for_index)
-                        else:
-                            logger.warning("User not found in superset")
-                            return redirect('/login/')
-                else:
-                    print('Error:', response.status_code)
-                    logger.warning("User not found")
-                    return redirect('/login/')
-            except requests.exceptions.RequestException as e:
-                logger.error('Error:')
-                return redirect('/login/')            
-
-        else:
-            if request.method == 'POST':
-                username = request.form['username']
-                password = request.form['password']
-                user = self.appbuilder.sm.auth_user_db(username, password)
-                if user:
-                    login_user(user, remember=False)
-                    return redirect(self.appbuilder.get_url_for_index)
-                else:
-                    flash('Invalid username or password', 'danger')
-            return super(CustomAuthDBView, self).login()
-    
-class CustomSecurityManager(SupersetSecurityManager):
-    authdbview = CustomAuthDBView
-
-CUSTOM_SECURITY_MANAGER = CustomSecurityManager
-AUTH_TYPE = AUTH_DB
+CELERY_CONFIG = CeleryConfig    
 
 OVERRIDE_HTTP_HEADERS = {'X-Frame-Options': 'ALLOWALL'}
 ENABLE_PROXY_FIX = True
-
+FEATURE_FLAGS = {
+    "DYNAMIC_PLUGINS": True,
+    "ALERTS_ATTACH_REPORTS": True,
+    "ALERT_REPORTS": True,
+    "DASHBOARD_RBAC": True,
+    "EMBEDDABLE_CHARTS": True,
+    "EMBEDDED_SUPERSET": True,
+    "FRAME_EMBED": True,
+    "ENABLE_TEMPLATE_PROCESSING": True,
+    "LISTVIEWS_DEFAULT_CARD_VIEW": True,
+    "SCHEDULED_QUERIES": True,
+    "SQL_VALIDATORS_BY_ENGINE": True,
+    "THUMBNAILS": True
+}
 FRAME_EMBED = True
 HTTP_HEADERS = {'X-Frame-Options': 'ALLOWALL'}
 TALISMAN_ENABLED = False
 ENABLE_CORS = True
 CORS_OPTIONS = {
-    "origins": ["http://127.0.0.1:3000/"],  # Replace with your React app's domain
+    "origins": ["*"],  # Replace with your React app's domain
     "supports_credentials": True,
     "allow_headers": ["*"],
     "expose_headers": ["Content-Length", "Content-Encoding"],
     "methods": ["GET", "POST", "OPTIONS", "DELETE", "PUT"],
+    "resources": ["*"]
 }
 
-FEATURE_FLAGS = {"ALERT_REPORTS": True, "EMBEDDED_SUPERSET": True,"EMBEDDABLE_CHARTS": True, "FRAME_EMBED": True}
+WTF_CSRF_ENABLED = False
+EMBEDDABLE_CHARTS = True
+EMBEDDED_SUPERSET = True
 ALERT_REPORTS_NOTIFICATION_DRY_RUN = True
 WEBDRIVER_BASEURL = "http://superset:8088/"  # When using docker compose baseurl should be http://superset_app:8088/
 # The base URL for the email report hyperlinks.
